@@ -22,6 +22,7 @@ pub enum Token {
         self_closing: bool,
         attributes: Vec<Attribute>,
     },
+    Character(char),
     Comment(String),
     EndOfFile,
 }
@@ -135,28 +136,7 @@ pub enum State {
     NumericCharacterReferenceEnd,
 }
 
-// TODO: Implement this
-pub struct Tokenizer {
-    current_state: State,
-    return_state: State,
-    parser_pause: bool,
-}
-
-impl Tokenizer {
-    fn new() -> Self {
-        Tokenizer {
-            current_state: State::Data,
-            return_state: State::Data,
-            parser_pause: false,
-        }
-    }
-
-    fn consume(&mut self, ch: char) {}
-
-    fn emit(&mut self) {}
-}
 pub fn tokenize(html: &String) -> Vec<Token> {
-    // let tokenizer = Tokenizer::new();
     let chars = html.chars().collect::<Vec<char>>();
     let mut tokens: Vec<Token> = Vec::new();
 
@@ -240,7 +220,7 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                     i -= 1;
                 }
                 _ if eof => {
-                    todo!("Emit a U+003C LESS-THAN SIGN character token");
+                    tokens.push(Token::Character('<'));
                     tokens.push(Token::EndOfFile);
                 }
                 _ => {}
@@ -254,8 +234,8 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                 }),
                 '>' => current_state = State::Data,
                 _ if eof => {
-                    todo!("Emit a U+003C LESS-THAN SIGN character token");
-                    todo!("Emit a U+002F SOLIDUS character token");
+                    tokens.push(Token::Character('<'));
+                    tokens.push(Token::Character('/'));
                     tokens.push(Token::EndOfFile);
                 }
                 _ => {
@@ -285,7 +265,7 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                     current_state = State::RcdataEndTagOpen;
                 }
                 _ => {
-                    todo!("Emit a U+003C LESS-THAN SIGN character token");
+                    tokens.push(Token::Character('<'));
                     i -= 1;
                     current_state = State::Rcdata;
                 }
@@ -298,8 +278,8 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                     attributes: Vec::new(),
                 }),
                 _ => {
-                    todo!("Emit a U+003C LESS-THAN SIGN character token");
-                    todo!("Emit a U+002F SOLIDUS character token");
+                    tokens.push(Token::Character('<'));
+                    tokens.push(Token::Character('/'));
                     i -= 1;
                     current_state = State::Rcdata;
                 }
@@ -312,9 +292,41 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                 }
                 '/' => todo!(),
                 '>' => todo!(),
-                _ if ch.is_ascii_uppercase() => todo!(),
-                _ if ch.is_ascii_lowercase() => todo!(),
-                _ => todo!(),
+                _ if ch.is_ascii_uppercase() => {
+                    current_tag_token_name.push(ch.to_ascii_lowercase());
+                    temporary_buffer.push(ch);
+                }
+                _ if ch.is_ascii_lowercase() => {
+                    current_tag_token_name.push(ch);
+                    temporary_buffer.push(ch);
+                }
+                _ => {
+                    for buffer_char in temporary_buffer.chars() {
+                        todo!("Emit </ and a character token for");
+                    }
+                    i -= 1;
+                    current_state = State::Rcdata;
+                }
+            },
+
+            State::RawtextLessThanSign => match ch {
+                '/' => {
+                    temporary_buffer.clear();
+                    current_state = State::RawtextEndTagOpen;
+                }
+                _ => {
+                    tokens.push(Token::Character('<'));
+                    i -= 1;
+                    current_state = State::Rawtext;
+                }
+            },
+
+            State::RawtextEndTagOpen => match ch {
+                '/' => {
+                    temporary_buffer.clear();
+                    current_state = State::RawtextEndTagOpen;
+                }
+                _ => {}
             },
         }
 
@@ -323,6 +335,8 @@ pub fn tokenize(html: &String) -> Vec<Token> {
 
     tokens
 }
+
+pub fn parse(html: &String) {}
 
 // pub fn parser(tokens: Vec<Token>) {
 //     // https://html.spec.whatwg.org/multipage/parsing.html#the-insertion-mode
