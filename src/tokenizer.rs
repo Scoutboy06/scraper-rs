@@ -137,24 +137,40 @@ pub enum State {
 }
 
 pub fn tokenize(html: &String) -> Vec<Token> {
-    let chars = html.chars().collect::<Vec<char>>();
-    let mut tokens: Vec<Token> = Vec::new();
+    /*
+    HTML Standard:
+    https://html.spec.whatwg.org/multipage/parsing.html#tokenization
 
+    Actions:
+    - Emit token => tokens.push()
+    - Switch state => current_state = State::
+    - Switch return state => return_state = State::
+    - Reconsume => i -= 1
+    - Temporary buffer => temporary_buffer
+        - Add => temporary_buffer.push()
+        - Clear => temporary_buffer.clear()
+    - Current tag token name => current_tag_token_name
+        - New => current_tag_token_name = new_tag.name (: &String)
+        - Push => current_tag_token_name.push()
+
+    - Appropriate end tag token
+        - `start_tags` is a vector containing all created start tags
+        - When a start tag is to be emitted, it is cloned into `tokens`.
+    */
+
+    let chars = html.chars().collect::<Vec<char>>();
+
+    let mut tokens: Vec<Token> = Vec::new();
     let mut current_state = State::Data;
     let mut return_state = State::Data;
-    let mut parser_pause = false;
-    let mut tokenized_chars = String::new(); // TODO: Implement this
-    let mut current_tag_token_name: &mut String; // TODO: Implement this
     let mut temporary_buffer = String::new();
+    let mut current_start_tag: Token;
+    let mut emitted_start_tags: Vec<&Token> = Vec::new();
 
     let mut ch: char;
     let mut eof = false; // End of file
     let mut i = 0;
     while i <= chars.len() {
-        if parser_pause {
-            continue;
-        }
-
         if i >= chars.len() {
             ch = '\0';
             eof = true;
@@ -170,7 +186,7 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                 }
                 '<' => current_state = State::TagOpen,
                 _ if eof => tokens.push(Token::EndOfFile),
-                _ => tokenized_chars.push(ch),
+                _ => tokens.push(Token::Character(ch)),
             },
 
             State::Rcdata => match ch {
@@ -182,31 +198,31 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                     current_state = State::RcdataLessThanSign;
                 }
                 _ if eof => tokens.push(Token::EndOfFile),
-                _ => tokenized_chars.push(ch),
+                _ => tokens.push(Token::Character(ch)),
             },
 
             State::Rawtext => match ch {
                 '<' => current_state = State::RawtextLessThanSign,
                 _ if eof => tokens.push(Token::EndOfFile),
-                _ => tokenized_chars.push(ch),
+                _ => tokens.push(Token::Character(ch)),
             },
 
             State::ScriptData => match ch {
                 '<' => current_state = State::ScriptDataLessThanSign,
                 _ if eof => tokens.push(Token::EndOfFile),
-                _ => tokenized_chars.push(ch),
+                _ => tokens.push(Token::Character(ch)),
             },
 
             State::Plaintext => match ch {
                 _ if eof => tokens.push(Token::EndOfFile),
-                _ => tokenized_chars.push(ch),
+                _ => tokens.push(Token::Character(ch)),
             },
 
             State::TagOpen => match ch {
                 '!' => current_state = State::MarkupDeclarationOpen,
                 '/' => current_state = State::EndTagOpen,
                 _ if ch.is_ascii_alphabetic() => {
-                    tokens.push(Token::StartTag {
+                    start_tags.push(Token::StartTag {
                         tag_name: String::new(),
                         self_closing: false,
                         attributes: Vec::new(),
@@ -223,15 +239,24 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                     tokens.push(Token::Character('<'));
                     tokens.push(Token::EndOfFile);
                 }
-                _ => {}
+                _ => {
+                    tokens.push(Token::Character('<'));
+                    i -= 1;
+                    current_state = State::Data;
+                }
             },
 
             State::EndTagOpen => match ch {
-                _ if ch.is_ascii_alphabetic() => tokens.push(Token::EndTag {
-                    tag_name: String::new(),
-                    self_closing: false,
-                    attributes: Vec::new(),
-                }),
+                _ if ch.is_ascii_alphabetic() => {
+                    tokens.push(Token::EndTag {
+                        tag_name: String::new(),
+                        self_closing: false,
+                        attributes: Vec::new(),
+                    });
+
+                    i -= 1;
+                    current_state = State::TagName;
+                }
                 '>' => current_state = State::Data,
                 _ if eof => {
                     tokens.push(Token::Character('<'));
@@ -288,7 +313,11 @@ pub fn tokenize(html: &String) -> Vec<Token> {
             State::RcdataEndTagName => match ch {
                 // Tab | Line feed (LF) | Form feed (FF) | Space
                 '\u{0009}' | '\u{000A}' | '\u{000C}' | '\u{0020}' => {
-                    todo!();
+                    if todo!("If the current end tag token is an appropriate end tag token") {
+                        current_state = State::BeforeAttributeName;
+                    } else {
+                        todo!("Threat it as per the 'anything else' entry below");
+                    }
                 }
                 '/' => todo!(),
                 '>' => todo!(),
@@ -302,7 +331,7 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                 }
                 _ => {
                     for buffer_char in temporary_buffer.chars() {
-                        todo!("Emit </ and a character token for");
+                        todo!("Emit </ and a character token");
                     }
                     i -= 1;
                     current_state = State::Rcdata;
@@ -335,29 +364,3 @@ pub fn tokenize(html: &String) -> Vec<Token> {
 
     tokens
 }
-
-pub fn parse(html: &String) {}
-
-// pub fn parser(tokens: Vec<Token>) {
-//     // https://html.spec.whatwg.org/multipage/parsing.html#the-insertion-mode
-//     let mut insertion_mode = InsertionMode::Initial;
-//     let mut original_insertion_mode: Option<InsertionMode> = None;
-//     let mut stack_of_template_insertion_modes: Vec<InsertionMode> = Vec::new();
-//     let mut current_template_insertion_mode: Option<InsertionMode> = None;
-
-//     // let mut head_element_pointer = None;
-//     // let mut form_element_pointer = None;
-
-//     let mut open_elements: Vec<u8> = Vec::new();
-
-//     let mut last = false;
-//     let mut node = open_elements.last();
-
-//     // let mut token: Token;
-//     let mut i: usize = 0;
-//     while i < tokens.len() {
-//         // token = tokens[i];
-
-//         i += 1;
-//     }
-// }
