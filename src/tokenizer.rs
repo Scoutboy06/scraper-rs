@@ -5,23 +5,27 @@ pub struct Attribute {
     value: String,
 }
 
+struct Doctype {
+    name: Option<String>,
+    public_id: Option<String>,
+    system_id: Option<String>,
+    force_quirks: bool,
+}
+struct StartTag {
+    tag_name: String,
+    self_closing: bool,
+    attributes: Vec<Attribute>,
+}
+struct EndTag {
+    tag_name: String,
+    self_closing: bool,
+    attributes: Vec<Attribute>,
+}
+
 pub enum Token {
-    Doctype {
-        name: Option<String>,
-        public_id: Option<String>,
-        system_id: Option<String>,
-        force_quirks: bool,
-    },
-    StartTag {
-        tag_name: String,
-        self_closing: bool,
-        attributes: Vec<Attribute>,
-    },
-    EndTag {
-        tag_name: String,
-        self_closing: bool,
-        attributes: Vec<Attribute>,
-    },
+    Doctype(Doctype),
+    StartTag(StartTag),
+    EndTag(EndTag),
     Character(char),
     Comment(String),
     EndOfFile,
@@ -155,6 +159,7 @@ pub fn tokenize(html: &String) -> Vec<Token> {
 
     - Appropriate end tag token
         - `start_tags` is a vector containing all created start tags
+        - End tag is appropriate if it matches the last emitted start tag name
         - When a start tag is to be emitted, it is cloned into `tokens`.
     */
 
@@ -164,7 +169,8 @@ pub fn tokenize(html: &String) -> Vec<Token> {
     let mut current_state = State::Data;
     let mut return_state = State::Data;
     let mut temporary_buffer = String::new();
-    let mut current_start_tag: Token;
+    let mut current_start_tag: StartTag;
+    let mut current_end_tag: EndTag;
     let mut emitted_start_tags: Vec<&Token> = Vec::new();
 
     let mut ch: char;
@@ -222,12 +228,11 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                 '!' => current_state = State::MarkupDeclarationOpen,
                 '/' => current_state = State::EndTagOpen,
                 _ if ch.is_ascii_alphabetic() => {
-                    start_tags.push(Token::StartTag {
+                    current_start_tag = StartTag {
                         tag_name: String::new(),
                         self_closing: false,
                         attributes: Vec::new(),
-                    });
-
+                    };
                     i -= 1;
                     current_state = State::TagName;
                 }
@@ -248,12 +253,11 @@ pub fn tokenize(html: &String) -> Vec<Token> {
 
             State::EndTagOpen => match ch {
                 _ if ch.is_ascii_alphabetic() => {
-                    tokens.push(Token::EndTag {
+                    current_end_tag = EndTag {
                         tag_name: String::new(),
                         self_closing: false,
                         attributes: Vec::new(),
-                    });
-
+                    };
                     i -= 1;
                     current_state = State::TagName;
                 }
@@ -278,10 +282,10 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                 '/' => current_state = State::SelfClosingStartTag,
                 '>' => current_state = State::Data,
                 _ if ch.is_ascii_uppercase() => {
-                    current_tag_token_name.push(ch.to_ascii_lowercase());
+                    current_start_tag.tag_name.push(ch.to_ascii_lowercase());
                 }
                 _ if eof => tokens.push(Token::EndOfFile),
-                _ => current_tag_token_name.push(ch),
+                _ => current_start_tag.tag_name.push(ch),
             },
 
             State::RcdataLessThanSign => match ch {
@@ -297,11 +301,15 @@ pub fn tokenize(html: &String) -> Vec<Token> {
             },
 
             State::RcdataEndTagOpen => match ch {
-                _ if ch.is_ascii_alphabetic() => tokens.push(Token::EndTag {
-                    tag_name: String::new(),
-                    self_closing: false,
-                    attributes: Vec::new(),
-                }),
+                _ if ch.is_ascii_alphabetic() => {
+                    current_end_tag = EndTag {
+                        tag_name: String::new(),
+                        self_closing: false,
+                        attributes: Vec::new(),
+                    };
+                    i -= 1;
+                    current_state = State::Rcdata;
+                }
                 _ => {
                     tokens.push(Token::Character('<'));
                     tokens.push(Token::Character('/'));
@@ -322,17 +330,21 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                 '/' => todo!(),
                 '>' => todo!(),
                 _ if ch.is_ascii_uppercase() => {
-                    current_tag_token_name.push(ch.to_ascii_lowercase());
+                    current_start_tag.tag_name.push(ch.to_ascii_lowercase());
                     temporary_buffer.push(ch);
                 }
                 _ if ch.is_ascii_lowercase() => {
-                    current_tag_token_name.push(ch);
+                    current_start_tag.tag_name.push(ch);
                     temporary_buffer.push(ch);
                 }
                 _ => {
+                    tokens.push(Token::Character('<'));
+                    tokens.push(Token::Character('/'));
+
                     for buffer_char in temporary_buffer.chars() {
-                        todo!("Emit </ and a character token");
+                        tokens.push(Token::Character(buffer_char));
                     }
+
                     i -= 1;
                     current_state = State::Rcdata;
                 }
@@ -352,10 +364,36 @@ pub fn tokenize(html: &String) -> Vec<Token> {
 
             State::RawtextEndTagOpen => match ch {
                 '/' => {
-                    temporary_buffer.clear();
-                    current_state = State::RawtextEndTagOpen;
+                    current_end_tag = EndTag {
+                        tag_name: String::new(),
+                        self_closing: false,
+                        attributes: Vec::new(),
+                    };
+                    i -= 1;
+                    current_state = State::RawtextEndTagName;
                 }
-                _ => {}
+                _ => {
+                    tokens.push(Token::Character('<'));
+                    tokens.push(Token::Character('/'));
+                    i -= 1;
+                    current_state = State::Rawtext;
+                }
+            },
+
+            State::RawtextEndTagName => match ch {
+                // Tab | Line feed (LF) | Form feed (FF) | Space
+                '\u{0009}' | '\u{000A}' | '\u{000C}' | '\u{0020}' => {
+                    if todo!("the current end tag token is an appropriate end tag token") {
+                        current_state = State::BeforeAttributeName;
+                    } else {
+                        todo!("Treat it as per the 'anything else' entry below");
+                    }
+                }
+                '/' => todo!(),
+                '>' => todo!(),
+                _ if ch.is_ascii_uppercase() => todo!(),
+                _ if ch.is_ascii_lowercase() => todo!(),
+                _ => todo!(),
             },
         }
 
