@@ -156,9 +156,9 @@ pub fn tokenize(html: &String) -> Vec<Token> {
     - Temporary buffer => temporary_buffer
         - Add => temporary_buffer.push()
         - Clear => temporary_buffer.clear()
-    - Current tag token name => current_tag_token_name
-        - New => current_tag_token_name = new_tag.name (: &String)
-        - Push => current_tag_token_name.push()
+    - Current tag token => current_tag
+        - New => current_tag = Tag::StartTag() | Tag::EndTag()
+        - Push tag name => current_tag.tag_name.push()
 
     - Appropriate end tag token
         - `start_tags` is a vector containing all created start tags
@@ -173,7 +173,7 @@ pub fn tokenize(html: &String) -> Vec<Token> {
     let mut return_state = State::Data;
     let mut temporary_buffer = String::new();
     let mut current_tag: Option<Tag> = None;
-    let mut emitted_start_tags: Vec<&Token> = Vec::new();
+    let mut open_start_tags: Vec<&StartTag> = Vec::new();
 
     let mut ch: char;
     let mut eof = false; // End of file
@@ -322,45 +322,45 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                 }
             },
 
-            State::RcdataEndTagName => match ch {
-                // Tab | Line feed (LF) | Form feed (FF) | Space
-                '\u{0009}' | '\u{000A}' | '\u{000C}' | '\u{0020}' => {
-                    if todo!("If the current end tag token is an appropriate end tag token") {
+            State::RcdataEndTagName => {
+                let is_appropriate = is_appropriate_end_tag(&current_tag, &open_start_tags);
+
+                match ch {
+                    // Tab | Line feed (LF) | Form feed (FF) | Space
+                    '\u{0009}' | '\u{000A}' | '\u{000C}' | '\u{0020}' if is_appropriate => {
                         current_state = State::BeforeAttributeName;
-                    } else {
-                        todo!("Threat it as per the 'anything else' entry below");
                     }
-                }
-                '/' => todo!(),
-                '>' => todo!(),
-                _ if ch.is_ascii_uppercase() => {
-                    match &mut current_tag {
-                        Some(Tag::StartTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
-                        Some(Tag::EndTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
-                        None => unreachable!(),
+                    '/' if is_appropriate => current_state = State::SelfClosingStartTag,
+                    '>' if is_appropriate => current_state = State::Data,
+                    _ if ch.is_ascii_uppercase() => {
+                        match &mut current_tag {
+                            Some(Tag::StartTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
+                            Some(Tag::EndTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
+                            None => unreachable!(),
+                        }
+                        temporary_buffer.push(ch);
                     }
-                    temporary_buffer.push(ch);
-                }
-                _ if ch.is_ascii_lowercase() => {
-                    match &mut current_tag {
-                        Some(Tag::StartTag(tag)) => tag.tag_name.push(ch),
-                        Some(Tag::EndTag(tag)) => tag.tag_name.push(ch),
-                        None => unreachable!(),
+                    _ if ch.is_ascii_lowercase() => {
+                        match &mut current_tag {
+                            Some(Tag::StartTag(tag)) => tag.tag_name.push(ch),
+                            Some(Tag::EndTag(tag)) => tag.tag_name.push(ch),
+                            None => unreachable!(),
+                        }
+                        temporary_buffer.push(ch);
                     }
-                    temporary_buffer.push(ch);
-                }
-                _ => {
-                    tokens.push(Token::Character('<'));
-                    tokens.push(Token::Character('/'));
+                    _ => {
+                        tokens.push(Token::Character('<'));
+                        tokens.push(Token::Character('/'));
 
-                    for buffer_char in temporary_buffer.chars() {
-                        tokens.push(Token::Character(buffer_char));
-                    }
+                        for buffer_char in temporary_buffer.chars() {
+                            tokens.push(Token::Character(buffer_char));
+                        }
 
-                    i -= 1;
-                    current_state = State::Rcdata;
+                        i -= 1;
+                        current_state = State::Rcdata;
+                    }
                 }
-            },
+            }
 
             State::RawtextLessThanSign => match ch {
                 '/' => {
@@ -390,25 +390,136 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                 }
             },
 
-            State::RawtextEndTagName => match ch {
-                // Tab | Line feed (LF) | Form feed (FF) | Space
-                '\u{0009}' | '\u{000A}' | '\u{000C}' | '\u{0020}' => {
-                    if todo!("the current end tag token is an appropriate end tag token") {
+            State::RawtextEndTagName => {
+                let is_appropriate = is_appropriate_end_tag(&current_tag, &open_start_tags);
+
+                match ch {
+                    // Tab | Line feed (LF) | Form feed (FF) | Space
+                    '\u{0009}' | '\u{000A}' | '\u{000C}' | '\u{0020}' if is_appropriate => {
                         current_state = State::BeforeAttributeName;
-                    } else {
-                        todo!("Treat it as per the 'anything else' entry below");
+                    }
+                    '/' if is_appropriate => current_state = State::SelfClosingStartTag,
+                    '>' if is_appropriate => current_state = State::Data,
+                    _ if ch.is_ascii_uppercase() => {
+                        match &mut current_tag {
+                            Some(Tag::StartTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
+                            Some(Tag::EndTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
+                            None => unreachable!(),
+                        }
+                        temporary_buffer.push(ch);
+                    }
+                    _ if ch.is_ascii_lowercase() => {
+                        match &mut current_tag {
+                            Some(Tag::StartTag(tag)) => tag.tag_name.push(ch),
+                            Some(Tag::EndTag(tag)) => tag.tag_name.push(ch),
+                            None => unreachable!(),
+                        }
+                        temporary_buffer.push(ch);
+                    }
+                    _ => {
+                        tokens.push(Token::Character('<'));
+                        tokens.push(Token::Character('/'));
+
+                        for c in temporary_buffer.chars() {
+                            tokens.push(Token::Character(c));
+                        }
+
+                        i -= 1;
+                        current_state = State::Rawtext;
                     }
                 }
-                '/' => todo!(),
-                '>' => todo!(),
-                _ if ch.is_ascii_uppercase() => todo!(),
-                _ if ch.is_ascii_lowercase() => todo!(),
-                _ => todo!(),
+            }
+
+            State::ScriptDataLessThanSign => match ch {
+                '/' => {
+                    temporary_buffer.clear();
+                    current_state = State::ScriptDataEndTagOpen;
+                }
+                '!' => {
+                    current_state = State::ScriptDataEscapeStart;
+                    tokens.push(Token::Character('<'));
+                    tokens.push(Token::Character('!'));
+                }
+                _ => {
+                    tokens.push(Token::Character('<'));
+                    i -= 1;
+                    current_state = State::ScriptData;
+                }
             },
+
+            State::ScriptDataEndTagOpen => match ch {
+                _ if ch.is_ascii_alphabetic() => {
+                    current_tag = Some(Tag::EndTag(EndTag {
+                        tag_name: String::new(),
+                    }));
+
+                    i -= 1;
+                    current_state = State::ScriptDataEndTagName;
+                }
+                _ => {
+                    tokens.push(Token::Character('<'));
+                    tokens.push(Token::Character('/'));
+                    i -= 1;
+                    current_state = State::ScriptData;
+                }
+            },
+
+            State::ScriptDataEndTagName => {
+                let is_appropriate = is_appropriate_end_tag(&current_tag, &open_start_tags);
+
+                match ch {
+                    // Tab | Line feed (LF) | Form feed (FF) | Space
+                    '\u{0009}' | '\u{000A}' | '\u{000C}' | '\u{0020}' if is_appropriate => {
+                        current_state = State::BeforeAttributeName;
+                    }
+                    '/' if is_appropriate => todo!(),
+                    '>' if is_appropriate => todo!(),
+                    _ if ch.is_ascii_uppercase() => {
+                        match &mut current_tag {
+                            Some(Tag::StartTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
+                            Some(Tag::EndTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
+                            None => unreachable!(),
+                        }
+                        temporary_buffer.push(ch);
+                    }
+                    _ if ch.is_ascii_lowercase() => {
+                        match &mut current_tag {
+                            Some(Tag::StartTag(tag)) => tag.tag_name.push(ch),
+                            Some(Tag::EndTag(tag)) => tag.tag_name.push(ch),
+                            None => unreachable!(),
+                        }
+                        temporary_buffer.push(ch);
+                    }
+                    _ => {
+                        tokens.push(Token::Character('<'));
+                        tokens.push(Token::Character('/'));
+
+                        for c in temporary_buffer.chars() {
+                            tokens.push(Token::Character(c));
+                        }
+
+                        i -= 1;
+                        current_state = State::Rawtext;
+                    }
+                }
+            }
         }
 
         i += 1;
     }
 
     tokens
+}
+
+fn is_appropriate_end_tag(tag: &Option<Tag>, open_start_tags: &Vec<&StartTag>) -> bool {
+    return match tag {
+        Some(Tag::EndTag(end_tag)) => {
+            if let Some(last_start_tag) = open_start_tags.last() {
+                return end_tag.tag_name == last_start_tag.tag_name;
+            } else {
+                return false;
+            }
+        }
+        _ => false,
+    };
 }
