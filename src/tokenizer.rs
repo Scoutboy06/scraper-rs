@@ -1,5 +1,7 @@
 #![allow(unused)]
 
+use reqwest::header::DATE;
+
 pub struct Attribute {
     name: String,
     value: String,
@@ -87,7 +89,7 @@ pub enum State {
     ScriptDataEscapedEndTagOpen,
     ScriptDataEscapedEndTagName,
     ScriptDataDoubleEscapeStart,
-    ScriptDataDoubleEscapede,
+    ScriptDataDoubleEscaped,
     ScriptDataDoubleEscapedDash,
     ScriptDataDoubleEscapedDashDash,
     ScriptDataDoubleEscapedLessThanSign,
@@ -331,13 +333,17 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                         current_state = State::BeforeAttributeName;
                     }
                     '/' if is_appropriate => current_state = State::SelfClosingStartTag,
-                    '>' if is_appropriate => current_state = State::Data,
+                    '>' if is_appropriate => {
+                        current_state = State::Data;
+                        tokens.push(Token::Character(ch));
+                    }
                     _ if ch.is_ascii_uppercase() => {
                         match &mut current_tag {
                             Some(Tag::StartTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
                             Some(Tag::EndTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
                             None => unreachable!(),
                         }
+
                         temporary_buffer.push(ch);
                     }
                     _ if ch.is_ascii_lowercase() => {
@@ -346,6 +352,7 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                             Some(Tag::EndTag(tag)) => tag.tag_name.push(ch),
                             None => unreachable!(),
                         }
+
                         temporary_buffer.push(ch);
                     }
                     _ => {
@@ -399,13 +406,17 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                         current_state = State::BeforeAttributeName;
                     }
                     '/' if is_appropriate => current_state = State::SelfClosingStartTag,
-                    '>' if is_appropriate => current_state = State::Data,
+                    '>' if is_appropriate => {
+                        current_state = State::Data;
+                        tokens.push(Token::Character(ch));
+                    }
                     _ if ch.is_ascii_uppercase() => {
                         match &mut current_tag {
                             Some(Tag::StartTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
                             Some(Tag::EndTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
                             None => unreachable!(),
                         }
+
                         temporary_buffer.push(ch);
                     }
                     _ if ch.is_ascii_lowercase() => {
@@ -414,6 +425,7 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                             Some(Tag::EndTag(tag)) => tag.tag_name.push(ch),
                             None => unreachable!(),
                         }
+
                         temporary_buffer.push(ch);
                     }
                     _ => {
@@ -472,14 +484,18 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                     '\u{0009}' | '\u{000A}' | '\u{000C}' | '\u{0020}' if is_appropriate => {
                         current_state = State::BeforeAttributeName;
                     }
-                    '/' if is_appropriate => todo!(),
-                    '>' if is_appropriate => todo!(),
+                    '/' if is_appropriate => current_state = State::SelfClosingStartTag,
+                    '>' if is_appropriate => {
+                        current_state = State::Data;
+                        tokens.push(Token::Character(ch));
+                    }
                     _ if ch.is_ascii_uppercase() => {
                         match &mut current_tag {
                             Some(Tag::StartTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
                             Some(Tag::EndTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
                             None => unreachable!(),
                         }
+
                         temporary_buffer.push(ch);
                     }
                     _ if ch.is_ascii_lowercase() => {
@@ -488,6 +504,7 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                             Some(Tag::EndTag(tag)) => tag.tag_name.push(ch),
                             None => unreachable!(),
                         }
+
                         temporary_buffer.push(ch);
                     }
                     _ => {
@@ -503,6 +520,409 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                     }
                 }
             }
+
+            State::ScriptDataEscapeStart => match ch {
+                '-' => {
+                    current_state = State::ScriptDataEscapeStartDash;
+                    tokens.push(Token::Character('-'));
+                }
+                _ => {
+                    i -= 1;
+                    current_state = State::ScriptData;
+                }
+            },
+
+            State::ScriptDataEscapeStartDash => match ch {
+                '-' => {
+                    current_state = State::ScriptDataEscapedDashDash;
+                    tokens.push(Token::Character('-'));
+                }
+                _ => {
+                    i -= 1;
+                    current_state = State::ScriptData;
+                }
+            },
+
+            State::ScriptDataEscaped => match ch {
+                '-' => {
+                    current_state = State::ScriptDataEscapedDash;
+                    tokens.push(Token::Character('-'));
+                }
+                '<' => current_state = State::ScriptDataEscapedLessThanSign,
+                _ if eof => tokens.push(Token::EndOfFile),
+                _ => tokens.push(Token::Character(ch)),
+            },
+
+            State::ScriptDataEscapedDash => match ch {
+                '-' => {
+                    current_state = State::ScriptDataEscapedDashDash;
+                    tokens.push(Token::Character('-'));
+                }
+                '<' => current_state = State::ScriptDataEscapedLessThanSign,
+                _ if eof => tokens.push(Token::EndOfFile),
+                _ => {
+                    current_state = State::ScriptDataEscaped;
+                    tokens.push(Token::Character(ch));
+                }
+            },
+
+            State::ScriptDataEscapedDashDash => match ch {
+                '-' => tokens.push(Token::Character('-')),
+                '<' => current_state = State::ScriptDataEscapedLessThanSign,
+                '>' => {
+                    current_state = State::ScriptData;
+                    tokens.push(Token::Character('>'));
+                }
+                _ if eof => tokens.push(Token::EndOfFile),
+                _ => {
+                    current_state = State::ScriptDataEscaped;
+                    tokens.push(Token::Character(ch));
+                }
+            },
+
+            State::ScriptDataEscapedLessThanSign => match ch {
+                '/' => {
+                    temporary_buffer.clear();
+                    current_state = State::ScriptDataEscapedEndTagOpen;
+                }
+                _ if ch.is_ascii_alphabetic() => {
+                    temporary_buffer.clear();
+                    tokens.push(Token::Character('<'));
+                    i -= 1;
+                    current_state = State::ScriptDataDoubleEscapeStart;
+                }
+                _ => {
+                    tokens.push(Token::Character('<'));
+                    i -= 1;
+                    current_state = State::ScriptDataEscaped;
+                }
+            },
+
+            State::ScriptDataEscapedEndTagOpen => match ch {
+                _ if ch.is_ascii_alphabetic() => {
+                    current_tag = Some(Tag::EndTag(EndTag {
+                        tag_name: String::new(),
+                    }));
+
+                    i -= 1;
+                    current_state = State::ScriptDataEscapedEndTagName;
+                }
+                _ => {
+                    tokens.push(Token::Character('<'));
+                    tokens.push(Token::Character('/'));
+                    i -= 1;
+                    current_state = State::ScriptDataEscaped;
+                }
+            },
+
+            State::ScriptDataEscapedEndTagName => {
+                let is_appropriate = is_appropriate_end_tag(&current_tag, &open_start_tags);
+
+                match ch {
+                    // Tab | Line feed (LF) | Form feed (FF) | Space
+                    '\u{0009}' | '\u{000A}' | '\u{000C}' | '\u{0020}' if is_appropriate => {
+                        current_state = State::BeforeAttributeName;
+                    }
+                    '/' if is_appropriate => current_state = State::SelfClosingStartTag,
+                    '>' if is_appropriate => {
+                        current_state = State::Data;
+                        tokens.push(Token::Character(ch));
+                    }
+                    _ if ch.is_ascii_uppercase() => {
+                        match &mut current_tag {
+                            Some(Tag::StartTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
+                            Some(Tag::EndTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
+                            None => unreachable!(),
+                        };
+
+                        temporary_buffer.push(ch);
+                    }
+
+                    _ if ch.is_ascii_lowercase() => {
+                        match &mut current_tag {
+                            Some(Tag::StartTag(tag)) => tag.tag_name.push(ch),
+                            Some(Tag::EndTag(tag)) => tag.tag_name.push(ch),
+                            None => unreachable!(),
+                        };
+
+                        temporary_buffer.push(ch);
+                    }
+
+                    _ => {
+                        tokens.push(Token::Character('<'));
+                        tokens.push(Token::Character('/'));
+
+                        for buff_char in temporary_buffer.chars() {
+                            tokens.push(Token::Character(buff_char));
+                        }
+
+                        i -= 1;
+                        current_state = State::ScriptData;
+                    }
+                }
+            }
+
+            State::ScriptDataEscapeStart => match ch {
+                '-' => {
+                    current_state = State::ScriptDataEscapeStartDash;
+                    tokens.push(Token::Character('-'));
+                }
+                _ => {
+                    i -= 1;
+                    current_state = State::ScriptData;
+                }
+            },
+
+            State::ScriptDataEscapeStartDash => match ch {
+                '-' => {
+                    current_state = State::ScriptDataEscapedDashDash;
+                    tokens.push(Token::Character('-'));
+                }
+                _ => {
+                    i -= 1;
+                    current_state = State::ScriptData;
+                }
+            },
+
+            State::ScriptDataEscaped => match ch {
+                '-' => {
+                    current_state = State::ScriptDataEscapedDash;
+                    tokens.push(Token::Character('-'));
+                }
+                '<' => current_state = State::ScriptDataEscapedLessThanSign,
+                _ if eof => tokens.push(Token::EndOfFile),
+                _ => tokens.push(Token::Character(ch)),
+            },
+
+            State::ScriptDataEscapedDash => match ch {
+                '-' => {
+                    current_state = State::ScriptDataEscapedDashDash;
+                    tokens.push(Token::Character('-'));
+                }
+                '<' => current_state = State::ScriptDataEscapedLessThanSign,
+                _ if eof => tokens.push(Token::EndOfFile),
+                _ => {
+                    current_state = State::ScriptDataEscaped;
+                    tokens.push(Token::Character(ch));
+                }
+            },
+
+            State::ScriptDataEscapedDashDash => match ch {
+                '-' => tokens.push(Token::Character('-')),
+                '<' => current_state = State::ScriptDataEscapedLessThanSign,
+                '>' => {
+                    current_state = State::ScriptData;
+                    tokens.push(Token::Character('>'));
+                }
+                _ if eof => tokens.push(Token::EndOfFile),
+                _ => {
+                    current_state = State::ScriptDataEscaped;
+                    tokens.push(Token::Character(ch));
+                }
+            },
+
+            State::ScriptDataEscapedLessThanSign => match ch {
+                '/' => {
+                    temporary_buffer.clear();
+                    current_state = State::ScriptDataEscapedEndTagOpen;
+                }
+                _ if ch.is_ascii_alphabetic() => {
+                    temporary_buffer.clear();
+                    tokens.push(Token::Character('<'));
+                    i -= 1;
+                    current_state = State::ScriptDataDoubleEscapeStart;
+                }
+                _ => {
+                    tokens.push(Token::Character('<'));
+                    i -= 1;
+                    current_state = State::ScriptDataEscaped;
+                }
+            },
+
+            State::ScriptDataEscapedEndTagOpen => match ch {
+                _ if ch.is_ascii_alphabetic() => {
+                    current_tag = Some(Tag::EndTag(EndTag {
+                        tag_name: String::new(),
+                    }));
+
+                    i -= 1;
+                    current_state = State::ScriptDataEscapedEndTagName;
+                }
+                _ => {
+                    tokens.push(Token::Character('<'));
+                    tokens.push(Token::Character('/'));
+                    i -= 1;
+                    current_state = State::ScriptDataEscaped;
+                }
+            },
+
+            State::ScriptDataEscapedEndTagName => {
+                let is_appropriate = is_appropriate_end_tag(&current_tag, &open_start_tags);
+
+                match ch {
+                    // Tab | Line feed (LF) | Form feed (FF) | Space
+                    '\u{0009}' | '\u{000A}' | '\u{000C}' | '\u{0020}' if is_appropriate => {
+                        current_state = State::BeforeAttributeName;
+                    }
+                    '/' if is_appropriate => current_state = State::SelfClosingStartTag,
+                    '>' if is_appropriate => {
+                        current_state = State::Data;
+                        tokens.push(Token::Character(ch));
+                    }
+                    _ if ch.is_ascii_uppercase() => {
+                        match &mut current_tag {
+                            Some(Tag::StartTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
+                            Some(Tag::EndTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
+                            None => unreachable!(),
+                        };
+
+                        temporary_buffer.push(ch);
+                    }
+
+                    _ if ch.is_ascii_lowercase() => {
+                        match &mut current_tag {
+                            Some(Tag::StartTag(tag)) => tag.tag_name.push(ch),
+                            Some(Tag::EndTag(tag)) => tag.tag_name.push(ch),
+                            None => unreachable!(),
+                        };
+
+                        temporary_buffer.push(ch);
+                    }
+
+                    _ => {
+                        tokens.push(Token::Character('<'));
+                        tokens.push(Token::Character('/'));
+
+                        for buff_char in temporary_buffer.chars() {
+                            tokens.push(Token::Character(buff_char));
+                        }
+
+                        i -= 1;
+                        current_state = State::ScriptData;
+                    }
+                }
+            }
+
+            State::ScriptDataDoubleEscapeStart => match ch {
+                '\u{0009}' | '\u{000A}' | '\u{000C}' | '\u{0020}' | '/' | '>' => {
+                    if temporary_buffer == "script".to_string() {
+                        current_state = State::ScriptDataDoubleEscaped;
+                    } else {
+                        current_state = State::ScriptDataEscaped;
+                    }
+
+                    tokens.push(Token::Character(ch));
+                }
+                _ if ch.is_ascii_uppercase() => {
+                    match &mut current_tag {
+                        Some(Tag::StartTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
+                        Some(Tag::EndTag(tag)) => tag.tag_name.push(ch.to_ascii_lowercase()),
+                        None => unreachable!(),
+                    };
+
+                    tokens.push(Token::Character(ch));
+                }
+
+                _ if ch.is_ascii_lowercase() => {
+                    match &mut current_tag {
+                        Some(Tag::StartTag(tag)) => tag.tag_name.push(ch),
+                        Some(Tag::EndTag(tag)) => tag.tag_name.push(ch),
+                        None => unreachable!(),
+                    };
+
+                    tokens.push(Token::Character(ch));
+                }
+
+                _ => {
+                    i -= 1;
+                    current_state = State::ScriptDataEscaped;
+                }
+            },
+
+            State::ScriptDataDoubleEscaped => match ch {
+                '-' => {
+                    current_state = State::ScriptDataDoubleEscapedDash;
+                    tokens.push(Token::Character('-'));
+                }
+                '<' => {
+                    current_state = State::ScriptDataDoubleEscapedLessThanSign;
+                    tokens.push(Token::Character('<'));
+                }
+                _ if eof => tokens.push(Token::EndOfFile),
+                _ => tokens.push(Token::Character(ch)),
+            },
+
+            State::ScriptDataDoubleEscapedDash => match ch {
+                '-' => {
+                    current_state = State::ScriptDataDoubleEscapedDashDash;
+                    tokens.push(Token::Character('-'));
+                }
+                '<' => {
+                    current_state = State::ScriptDataDoubleEscapedLessThanSign;
+                    tokens.push(Token::Character('<'));
+                }
+                _ if eof => tokens.push(Token::EndOfFile),
+                _ => {
+                    current_state = State::ScriptDataDoubleEscaped;
+                    tokens.push(Token::Character(ch));
+                }
+            },
+
+            State::ScriptDataDoubleEscapedDashDash => match ch {
+                '-' => tokens.push(Token::Character('-')),
+                '<' => {
+                    current_state = State::ScriptDataDoubleEscapedLessThanSign;
+                    tokens.push(Token::Character('<'));
+                }
+                '>' => {
+                    current_state = State::ScriptData;
+                    tokens.push(Token::Character('>'));
+                }
+                _ if eof => tokens.push(Token::EndOfFile),
+                _ => {
+                    current_state = State::ScriptDataDoubleEscaped;
+                    tokens.push(Token::Character(ch));
+                }
+            },
+
+            State::ScriptDataDoubleEscapedLessThanSign => match ch {
+                '/' => {
+                    temporary_buffer.clear();
+                    current_state = State::ScriptDataDoubleEscapeEnd;
+                    tokens.push(Token::Character('/'));
+                }
+                _ => {
+                    i -= 1;
+                    current_state = State::ScriptDataDoubleEscaped;
+                }
+            },
+
+            State::ScriptDataDoubleEscapeEnd => match ch {
+                '\u{0009}' | '\u{000A}' | '\u{000C}' | '\u{0020}' | '/' | '>' => {
+                    if temporary_buffer == "script".to_string() {
+                        current_state = State::ScriptDataEscaped;
+                    } else {
+                        current_state = State::ScriptDataDoubleEscaped;
+                    }
+
+                    tokens.push(Token::Character(ch));
+                }
+
+                _ if ch.is_ascii_uppercase() => {
+                    temporary_buffer.push(ch.to_ascii_lowercase());
+                    tokens.push(Token::Character(ch));
+                }
+
+                _ if ch.is_ascii_lowercase() => {
+                    temporary_buffer.push(ch);
+                    tokens.push(Token::Character(ch));
+                }
+
+                _ => {
+                    i -= 1;
+                    current_state = State::ScriptDataDoubleEscaped;
+                }
+            },
         }
 
         i += 1;
@@ -511,8 +931,8 @@ pub fn tokenize(html: &String) -> Vec<Token> {
     tokens
 }
 
-fn is_appropriate_end_tag(tag: &Option<Tag>, open_start_tags: &Vec<&StartTag>) -> bool {
-    return match tag {
+fn is_appropriate_end_tag(current_tag: &Option<Tag>, open_start_tags: &Vec<&StartTag>) -> bool {
+    return match current_tag {
         Some(Tag::EndTag(end_tag)) => {
             if let Some(last_start_tag) = open_start_tags.last() {
                 return end_tag.tag_name == last_start_tag.tag_name;
