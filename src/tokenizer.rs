@@ -175,6 +175,7 @@ pub fn tokenize(html: &String) -> Vec<Token> {
     let mut return_state = State::Data;
     let mut temporary_buffer = String::new();
     let mut current_tag: Option<Tag> = None;
+    let mut current_attribute: Option<&Attribute> = None;
     let mut open_start_tags: Vec<&StartTag> = Vec::new();
 
     let mut ch: char;
@@ -921,6 +922,50 @@ pub fn tokenize(html: &String) -> Vec<Token> {
                 _ => {
                     i -= 1;
                     current_state = State::ScriptDataDoubleEscaped;
+                }
+            },
+
+            State::BeforeAttributeName => match ch {
+                // Tab | Line feed (LF) | Form feed (FF) | Space
+                '\u{0009}' | '\u{000A}' | '\u{000C}' | '\u{0020}' => {}
+                '/' | '>' | _ if eof => {
+                    i -= 1;
+                    current_state = State::AfterAttributeName;
+                }
+                '=' => match &mut current_tag {
+                    Some(Tag::StartTag(tag)) => {
+                        tag.attributes.push(Attribute {
+                            name: String::from(ch),
+                            value: String::new(),
+                        });
+
+                        current_state = State::AttributeName;
+                    }
+
+                    _ => unreachable!(),
+                },
+
+                _ => match &mut current_tag {
+                    Some(Tag::StartTag(tag)) => {
+                        tag.attributes.push(Attribute {
+                            name: String::new(),
+                            value: String::new(),
+                        });
+                        i -= 1;
+                        current_state = State::AttributeName;
+                    }
+                    _ => unreachable!(),
+                },
+            },
+
+            State::AttributeName => match ch {
+                '\u{0009}' | '\u{000A}' | '\u{000C}' | '\u{0020}' | '/' | '>' | _ if eof => {
+                    i -= 1;
+                    current_state = State::AfterAttributeName;
+                }
+                '=' => current_state = State::BeforeAttributeValue,
+                _ if ch.is_ascii_uppercase() => match current_tag {
+                    Some(Tag::)
                 }
             },
         }
